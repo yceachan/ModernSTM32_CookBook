@@ -206,3 +206,11 @@ this:拷贝构造中的临时右值对象，位于栈上
 this->puf: 构造函数中申请的堆上空间，位于堆上
 
 ![image-20230508162626868](https://s2.loli.net/2023/05/08/FMrBp9hDqdV8kX1.png)
+
+
+
+# 2.cpu运作模式
+
+> ref: [RTOS的发展(Armv7-M篇) - 哔哩哔哩 (bilibili.com)](https://www.bilibili.com/read/cv15839248?spm_id_from=333.999.0.0)
+
+ ![image-20230509001158524](https://s2.loli.net/2023/05/09/NAsFTjBE7hzSGWy.png)
