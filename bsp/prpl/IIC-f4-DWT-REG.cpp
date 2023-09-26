@@ -1,40 +1,36 @@
-//
-// Created by 衣陈 on 2023/3/25.
-//
+/********************************************/
+//*软件IIC驱动框架，适配打拍、DWT、TIM等多种微妙级延时方法以产生通信时序
+//*对代码性能、IIC时序细节进行了多处实验和优化，标称配速250khz,实际达到172khz.
+//*ref :非常值得参阅的[C++性能优化指南.pdf]
+/********************************************/
 
 #include "IIC.h"
-#include"LOG.hpp"
-struct Reg32{
-    volatile uint32_t reg;
-};
+
+
 /********************************************/
 /*毫秒级延时驱动方面，由如下方案：
-1.__NOP。除了不优雅没什么大的缺点，需要借助仪表用实验方法获得经验配置
-2、SYSTICK和其他定时器外设。驱动方式建议直接使用宏，delay_us函数是代码热点，调栈等开销会被无限放大。
-3、DWT_CNT方案。Cortex-M4内核通用方案，f103不适用，DWT内有一个随MCU主时钟自重装载向上计数的计时器。驱动方式见M4权威指南。
+*1.__NOP。除了不优雅没什么大的缺点，需要借助仪表用实验方法获得经验配置
+*2、SYSTICK和其他定时器外设。驱动方式建议直接使用宏，delay_us函数是代码热点，调栈等开销会被无限放大。
+*3、DWT_CNT方案。Cortex-M4内核通用方案，f1不适用，DWT内有一个随MCU主时钟自重装载向上计数的计时器。驱动方式见M4权威指南。
 /********************************************/
-#define __DWT_FOR_DELAY__
-#ifdef __DWT_FOR_DELAY__
-#define DWT_CTRL           ((( Reg32*)0xE0001000)->reg)
-#define DWT_CYCCNT         (((Reg32*)0xE0001004)->reg)
-#define DEMCR              (((Reg32*)0xE000EDFC)->reg)
-#define  DWT_ENABLE        (1 << 24)
-#define DWT_CYCCNT_ENABLE  (1 << 0)
-#define m_freq             (168)
-
-inline void DWT_init() {
-    ATOMIC_SET_BIT(DEMCR, DWT_ENABLE);
-    ATOMIC_SET_BIT(DWT_CTRL, DWT_CYCCNT_ENABLE);
-}
-
-inline void delay_us(uint16_t us) {
-     DWT_CYCCNT=0;
-     while(DWT_CYCCNT<m_freq*us);
-}
+#define __LOG_ENABLE__
+#ifdef __LOG_ENABLE__
+#include"LOG.hpp"
 #else
+ void print(char*){return;}
+#endif
+
+#define __DWT_FOR_DELAY__
+// #define __NOP_FOR_DELAY__
+// #define __TIM_FOR_DELAY__
+#ifdef __DWT_FOR_DELAY__
+#include "DWT.h"
+static void delay_us(uint32_t us){
+    dwt_.delay_us(us);
+}
+
 #ifdef __NOP_FOR_DELAY__
-//修饰函数的volatile标志，意为取消对该函数的编译优化。
-volatile void delay_us(uint16_t us) {
+volatile static void delay_us(uint16_t us) {
     uint8_t i;
     /*　
          下面的时间是通过安富莱AX-Pro逻辑分析仪测试得到的。
@@ -47,8 +43,9 @@ volatile void delay_us(uint16_t us) {
 }
 #else 
 #ifdef __TIM_FOR_DELAY__
+//*传入1Mhz的定时器，由于总线访问等开销，在MCU级的主频下，延时时间实际更长(+0.5-1us)
 #define DELAYER &htimX
-void delay_us(uint16_t us) {
+static void delay_us(uint16_t us) {
     __HAL_TIM_SET_COUNTER(DELAYER , 0);
     HAL_TIM_Base_Start(DELAYER);
     uint16_t block = 0;
@@ -146,15 +143,15 @@ void BaseIICdev::stop() {
     this->set_SDA(HIGH);
     holdonDelay();//SDA high pulse duration between STOP and START :1.3us ：1.3us的holdon SDA采集
 //    this->set_SCL(LOW);   通讯结束，空闲释放SCL即可,无需拉低SCL。
-//    holdonDelay();//SCL low period:1.3us
+//    holdonDelay();//SCL low period require:1.3us
 }
 
 void BaseIICdev::ack(){
-    this->set_SDA(LOW); //���ݴ�����
+    this->set_SDA(LOW); //准备应答信号
     setupDelay();
     this->set_SCL(HIGH);
-    holdonDelay();
-    this->set_SCL(LOW);//SCL被拉低后不需要holdon把
+    holdonDelay();        //应答信号的保持/采样时间
+    this->set_SCL(LOW);
     setupDelay();
     this->set_SDA(HIGH);//主机完成SDA低应答后，释放SDA
 }
@@ -177,7 +174,7 @@ void BaseIICdev::sendByte(uint8_t data){
         data<<=1;
         set_SCL(LOW);setupDelay();  //SCL LOW要求1.3us,配合SDA的setupDelay 正好
     }
-    set_SDA(HIGH);//�ͷ�SDA
+    set_SDA(HIGH);//释放SDA
 }
 uint8_t BaseIICdev::readByte() {
     uint8_t Rx=0;
@@ -211,7 +208,7 @@ BaseIICdev::BaseIICdev(uint16_t devADR, GPIO_TypeDef *sclPORT, uint16_t sclPIN, 
     this->SDA_PIN=sdaPIN;
     this->SDA_PORT=sdaPORT;
 }
-
+//*寄存器驱动，加速IO
 void BaseIICdev::set_SCL(BaseIICdev::PIN_STATE op) const {
     if(op != LOW)
     {

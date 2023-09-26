@@ -6,12 +6,20 @@
 
 7位地址16位数据的IIC总线设备
 
-驱动方式不同常规的读写寄存器操作，而是`devADR-->cmd`的方式。因此为软件IIC扩展了
+为软件IIC拓展以下通信逻辑
 
-`cmdwrite(u8 cmd)；`
+其IIC驱动不是寄存器风格，而是command。
 
-`seqWR(u8* tx ,u32 tx_len,u8*rx,r32 rx_len)`
+`cmdwrite(u8 cmd)；` //写u8
 
-两钟通信逻辑。
+`seqWR(u8* tx ,u32 tx_len,u8*rx,r32 rx_len)` //写后读
 
-文档就不贴了
+
+
+软件主要配置参考datasheet
+
+`4 Operation and Communication`
+
+可配置单次/周期采样模式、测量精度；
+
+自加热指令；
